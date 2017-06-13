@@ -1,18 +1,17 @@
-# Kubernetes Production Patterns
+# Kubernetes 生产环境部署模式
 
-... and anti-patterns.
+……和反模式。
 
-We are going to explore helpful techniques to improve resiliency and high availability
-of Kubernetes deployments and will take a look at some common mistakes to avoid when
-working with Docker and Kubernetes.
+我们将探索有帮助的技术，以提高 Kubernetes 部署的弹性和高可用性，
+还会看看使用 Docker 和 Kubernetes 时要避免的一些常见错误。
 
-## Installation
+## 安装
 
-First, follow [installation instructions](README.md#installation)
+首先，按照 [安装说明](README.md#installation) 进行安装
 
-### Anti-Pattern: Mixing build environment and runtime environment
+### 反模式：混合了构建环境和运行时环境
 
-Let's take a look at this dockerfile
+来看这个 dockerfile
 
 ```Dockerfile
 FROM ubuntu:14.04
@@ -22,7 +21,7 @@ RUN apt-get install gcc
 RUN gcc hello.c -o /hello
 ```
 
-It compiles and runs a simple helloworld program:
+它编译并运行一个简单的 helloworld 程序：
 
 ```bash
 $ cd prod/build
@@ -31,24 +30,24 @@ $ docker run prod
 Hello World
 ```
 
-There are a couple of problems with the resulting Dockerfile:
+最终的 Dockerfile 有几个问题：
 
-**Size**
+**大小**
 
 ```bash
 $ docker images | grep prod
 prod                                          latest              b2c197180350        14 minutes ago      293.7 MB
 ```
 
-That's almost 300 megabytes to host several kilobytes of the c program! We are bringing in package manager,
-C compiler and lots of other unnecessary tools that are not required to run this program.
+几乎是用 300MB 的镜像来部署几 KB 的 c 程序！
+引入了包管理器、C 编译器和运行此程序不需要的大量的工具。
 
 
-Which leads us to the second problem:
+这为我们带来第二个问题：
 
-**Security**
+**安全**
 
-We distribute the whole build toolchain. In addition to that, we ship the source code of the image:
+我们分发了整个构建工具链。除此之外，还发布了镜像的源代码：
 
 ```bash
 $ docker run --entrypoint=cat prod /build/hello.c
@@ -61,10 +60,10 @@ int main()
 }
 ```
 
-**Splitting build environment and run environment**
+**拆分构建环境和运行环境**
 
-We are going to use "buildbox" pattern to build an image with build environment,
-and we will use a much smaller runtime environment to run our program
+我们使用 “buildbox” 模式来构建包含构建环境的映像，
+并且用更小的运行环境来运行程序
 
 
 ```bash
@@ -72,21 +71,22 @@ $ cd prod/build-fix
 $ docker build -f build.dockerfile -t buildbox .
 ```
 
-**NOTE:** We have used new `-f` flag to specify the dockerfile we are going to use.
+**注意：** 使用 `-f` 标志来指定我们要用的 dockerfile。
 
-Now we have a `buildbox` image that contains our build environment. We can use it to compile the C program now:
+现在我们有一个包含构建环境的 “buildbox” 镜像。
+可以用它来编译 C 程序：
 
 ```bash
 $ docker run -v $(pwd):/build  buildbox gcc /build/hello.c -o /build/hello
 ```
 
-We have not used `docker build` this time, but mounted the source code and run the compiler directly.
+这次没有使用 `docker build` 命令，而是直接挂载源代码并运行编译器。
 
-**NOTE:** Docker will soon support this pattern natively by introducing [build stages](https://github.com/docker/docker/pull/32063) into the build process.
+**注意：** Docker 将很快支持这种模式，通过在构建过程中引入 [构建阶段（build stages）](https://github.com/docker/docker/pull/32063)。
 
-**UPDATE:** [Multi-stage builds is now available in CE](https://docs.docker.com/engine/userguide/eng-image/multistage-build/).
+**更新:** [现在 CE（Docker CE Edge）中提供了多阶段构建](https://docs.docker.com/engine/userguide/eng-image/multistage-build/).
 
-We can now use a much simpler (and smaller) dockerfile to run our image:
+现在可以使用更简单（也更小）的 dockerfile 来运行我们的映像：
 
 ```Dockerfile
 FROM quay.io/gravitational/debian-tall:0.0.1
@@ -104,21 +104,21 @@ prod                                          v2                  ef93cea87a7c  
 prod                                          latest              b2c197180350        45 minutes ago       293.7 MB
 ```
 
-**NOTE:** Please be aware that you should either plan on providing the needed "shared libraries" in the runtime image or "statically build" you binaries to have them include all needed libraries.
+**注意：** 请注意，您应该计划好或者在映像中提供所需的“共享库”，或者在“静态构建”的二进制文件中其包含所需的库。
 
-### Anti Pattern: Zombies and orphans
+### 反模式: 僵尸进程和孤儿进程
 
-**NOTICE:** this example demonstration will only work on Linux
+**注意：** 此示例演示只适用于 Linux
 
-**Orphans**
+**孤儿进程**
 
-It is quite easy to leave orphaned processes running in the background. Let's take an image we have built in the previous example:
+很容易留下孤立的进程在后台运行。来看看前一个例子中建立的镜像：
 
 ```bash
 docker run busybox sleep 10000
 ```
 
-Now, let's open a separate terminal and locate the process
+现在，打开一个单独的终端并找到该进程
 
 ```bash
 ps uax | grep sleep
@@ -126,15 +126,15 @@ sasha    14171  0.0  0.0 139736 17744 pts/18   Sl+  13:25   0:00 docker run busy
 root     14221  0.1  0.0   1188     4 ?        Ss   13:25   0:00 sleep 10000
 ```
 
-As you see there are in fact two processes: `docker run` and `sleep 1000` running in a container.
+可见，实际上有两个进程：`docker run` 和在容器中运行的 `sleep 1000`。
 
-Let's send kill signal to the `docker run` (just as CI/CD job would do for long running processes):
+我们把 kill 信号发送到 `docker run` 进程（就像 CI / CD 任务对长时间运行的进程一样）：
 
 ```bash
 kill 14171
 ```
 
-`docker run` process has not exited, and `sleep` process is running!
+`docker run` 进程没有退出，`sleep` 进程仍在运行！
 
 ```bash
 ps uax | grep sleep
@@ -142,32 +142,32 @@ root     14221  0.0  0.0   1188     4 ?        Ss   13:25   0:00 sleep 10000
 ```
 
 
-Yelp engineers have a good answer for why this happens [here](https://github.com/Yelp/dumb-init):
+Yelp的工程师对为什么出现这种情况有一个很好的答案，看 [这里](https://github.com/Yelp/dumb-init):
 
-> The Linux kernel applies special signal handling to processes which run as PID 1.
-> When processes are sent a signal on a normal Linux system, the kernel will first check for any custom handlers the process has registered for that signal, and otherwise fall back to default behavior (for example, killing the process on SIGTERM).
+> Linux 内核对以 PID 1 运行的进程作了特殊的信号处理。
+> 当普通的 Linux 系统上进程接收到一个信号时，内核将首先检查该进程所注册的自定义信号处理程序，否则会执行默认行为（例如，SIGTERM 时杀死进程）。
 
-> However, if the process receiving the signal is PID 1, it gets special treatment by the kernel; if it hasn't registered a handler for the signal, the kernel won't fall back to default behavior, and nothing happens. In other words, if your process doesn't explicitly handle these signals, sending it SIGTERM will have no effect at all.
+> 然而，如果接收信号的过程是PID 1，它得到内核的特殊对待；如果没有注册信号处理程序，内核不会执行默认行为，而是不做任何操作。换一种说法，如果进程没有明确处理这些信号，发送 SIGTERM 不会有任何效果。
 
-To solve this (and other) issues, you need a simple init system that has proper signal handlers specified. Luckily `Yelp` engineers built the simple and lightweight init system, `dumb-init`
+为了解决这个问题（还有其它问题），需要一个简单的 init 系统，它具有适当的信号处理程序。
+幸运的是，`Yelp` 的工程师们构建了简单而轻量级的 init 系统，`dumb-init`
 
 ```bash
 docker run quay.io/gravitational/debian-tall /usr/bin/dumb-init /bin/sh -c "sleep 10000"
 ```
 
-Now you can simply stop `docker run` process using SIGTERM and it will handle shutdown properly
+现在，您可以简单的使用 SIGTERM 停止 `docker run` 进程，它会妥善处理关闭
 
-### Anti-Pattern: Direct Use Of Pods
+### 反模式： 直接使用 Pods
 
-[Kubernetes Pod](https://kubernetes.io/docs/user-guide/pods/#what-is-a-pod) is a building block that itself is not durable.
+[Kubernetes Pod](https://kubernetes.io/docs/user-guide/pods/#what-is-a-pod) 是一个构建块，本身不持久。
 
-Do not use Pods directly in production. They won't get rescheduled, retain their data or guarantee any durability.
+不要直接在生产中使用 Pods。它们不会被重新调度，保留其数据或保证任何持久性。
 
-Instead, you can use `Deployment` with replication factor 1, which will guarantee that pods will get rescheduled
-and will survive eviction or node loss.
+取而代之的是，可以使用 `Deployment` 与复制因子 1，这将保证 pods 被重新调度，并将在被逐出或节点丢失后得以幸免。
 
 
-### Anti-Pattern: Using background processes
+### 反模式： 使用后台进程
 
 ```bash
 $ cd prod/background
@@ -179,7 +179,7 @@ NAME      READY     STATUS    RESTARTS   AGE
 crash     1/1       Running   0          5s
 ```
 
-The container appears to be running, but let's check if our server is running there:
+容器似乎正在运行，但是让我们检查一下我们的服务器进程是否在运行：
 
 ```bash
 $ kubectl exec -ti crash /bin/bash
@@ -194,14 +194,12 @@ root        11  0.0  0.0  19180  1296 ?        R+   00:18   0:00 ps uax
 root@crash:/# 
 ```
 
-**Using Probes**
+**使用探针（Probes）**
 
-We made a mistake and the HTTP server is not running there but there is no indication of this as the parent
-process is still running.
+我们犯了错误，HTTP服务器没有运行，但没有特征表明这一点，因为父进程仍在运行。
 
-The first obvious fix is to use a proper init system and monitor the status of the web service.
-However, let's use this as an opportunity to use liveness probes:
-
+第一个直接的修复方法是使用正确的 init 系统并监视 web 服务的状态。
+但是，让我们以此开始引入使用存活探测器：
 
 ```yaml
 apiVersion: v1
@@ -226,7 +224,7 @@ spec:
 $ kubectl create -f fix.yaml
 ```
 
-The liveness probe will fail and the container will get restarted.
+存活性探测器的探测结果为失败，容器将重新启动。
 
 ```bash
 $ kubectl get pods
@@ -235,9 +233,9 @@ crash     1/1       Running   0          11m
 fix       1/1       Running   1          1m
 ```
 
-### Production Pattern: Logging
+### 生产模式： 日志
 
-Set up your logs to go to stdout:
+设置日志输出到标准输出：
 
 ```bash
 $ kubectl create -f logs/logs.yaml
@@ -245,19 +243,18 @@ $ kubectl logs logs
 hello, world!
 ```
 
-Kubernetes and Docker have a system of plugins to make sure logs sent to stdout and stderr will get
-collected, forwarded and rotated.
+Kubernetes 和 Docker 都有插件系统，以确保发送到 stdout 和 stderr 的日志被收集，转发和轮转。
 
-**NOTE:** This is one of the patterns of [The Twelve Factor App](https://12factor.net/logs) and Kubernetes supports it out of the box!
+**注意：** 这是 [The Twelve Factor App](https://12factor.net/logs) 的模式之一，Kubernetes 内置支持！
 
-### Production Pattern: Immutable containers
+### 生产模式： 不可变容器
 
-Every time you write something to container's filesystem, it activates [copy on write strategy](https://docs.docker.com/engine/userguide/storagedriver/imagesandcontainers/#container-and-layers).
+每当你对容器的文件系统写数据，它会采用 [写时拷贝策略](https://docs.docker.com/engine/userguide/storagedriver/imagesandcontainers/#container-and-layers)。
 
-A new storage layer is created using a storage driver (devicemapper, overlayfs or others). In case of active usage,
-it can put a lot of load on storage drivers, especially in case of Devicemapper or BTRFS.
+新的存储层被存储驱动程序（devicemapper，overlayfs 或其它）创建。
+如果使用很活跃，它会为存储驱动程序带来很大的负载，特别是在使用 Devicemapper 或 BTRFS 的情况下。
 
-Make sure your containers write data only to volumes. You can use `tmpfs` for small (as tmpfs stores everything in memory) temporary files:
+确保您的容器仅将重要数据写入卷。可以使用 `tmpfs` 保存小的（因为 tmpfs 的所有内容存储在内存中）临时文件：
 
 ```yaml
 apiVersion: v1
@@ -276,12 +273,11 @@ spec:
     emptyDir: {}
 ```
 
-### Anti-Pattern: Using `latest` tag
+### 反模式： 使用 `latest` 标签（tag）
 
-Do not use `latest` tag in production. It creates ambiguity, as it's not clear what real version of the app this is.
+在生产中不要使用 `latest` 标签。 它造成歧义，因为搞不清楚真正的版本的应用程序是什么。
 
-It is ok to use `latest` for development purposes, although make sure you set `imagePullPolicy` to `Always`, to make sure
-Kubernetes always pulls the latest version when creating a pod:
+可以为开发目的而使用 `latest` 标签，确保将 `imagePullPolicy` 设置为 `Always`，确保 Kubernetes 在创建 pod 时总是拉取最新版本：
 
 ```yaml
 apiVersion: v1
@@ -297,9 +293,9 @@ spec:
     imagePullPolicy: Always
 ```
 
-### Production Pattern: Pod Readiness
+### 生产模式： Pod 就绪状态
 
-Imagine a situation when your container takes some time to start. To simulate this, we are going to write a simple script:
+想象一种情况，容器需要较长时间才能启动。为模拟这个情况，写一个简单的脚本：
 
 ```bash
 #!/bin/bash
@@ -310,7 +306,7 @@ echo "Started up successfully"
 python -m http.serve 5000
 ```
 
-Push the image and start service and deployment:
+推送镜像、启动服务和部署：
 
 ```yaml
 $ cd prod/delay
@@ -320,7 +316,7 @@ $ kubectl create -f service.yaml
 $ kubectl create -f deployment.yaml
 ```
 
-Enter curl container inside the cluster and make sure it all works:
+进入集群内的 curl 容器，确保一切工作正常：
 
 ```
 kubectl run -i -t --rm cli --image=tutum/curl --restart=Never
@@ -329,10 +325,9 @@ curl http://delay:5000
 ...
 ```
 
-You will notice that there's a `connection refused error`, when you try to access it
-for the first 30 seconds.
+当在前 30 秒内尝试访问它时，会出现 `拒绝连接错误`。
 
-Update deployment to simulate deploy:
+更新模拟部署环境：
 
 ```bash
 $ docker build -t $(minikube ip):5000/delay:0.0.2 .
@@ -340,17 +335,17 @@ $ docker push $(minikube ip):5000/delay:0.0.2
 $ kubectl replace -f deployment-update.yaml
 ```
 
-In the next window, let's try to to see if we got any service downtime:
+在下一个窗口中，试试看是否有任何服务中断时间：
 
 ```bash
 curl http://delay:5000
 curl: (7) Failed to connect to delay port 5000: Connection refused
 ```
 
-We've got a production outage despite setting `maxUnavailable: 0` in our rolling update strategy!
-This happened because Kubernetes did not know about startup delay and readiness of the service.
+我们发生了一次服务停机，尽管已经在滚动更新策略里设置了 `maxUnavailable：0`！
+发生这种情况是因为 Kubernetes 不知道启动延时和服务的准备就绪状态。
 
-Let's fix that by using readiness probe:
+我们通过使用就绪探测来解决这个问题：
 
 ```yaml
 readinessProbe:
@@ -361,20 +356,19 @@ readinessProbe:
   periodSeconds: 5
 ```
 
-Readiness probe indicates the readiness of the pod containers and Kubernetes will take this into account when
-doing a deployment:
+准备探测器指示 pod 容器的准备就绪状态，Kubernetes 在进行部署时会参考这一项：
 
 ```bash
 $ kubectl replace -f deployment-fix.yaml
 ```
 
-This time we will get no downtime.
+这次我们没有服务停机。
 
-### Anti-Pattern: unbound quickly failing jobs
+### 反模式：解绑迅速失败的任务
 
-Kubernetes provides new useful tool to schedule containers to perform one-time task: [jobs](https://kubernetes.io/docs/concepts/jobs/run-to-completion-finite-workloads/)
+Kubernetes 提供有用的新工具来安排容器执行一次性任务：[jobs](https://kubernetes.io/docs/concepts/jobs/run-to-completion-finite-workloads/)
 
-However, there is a problem:
+但是，有一个问题：
 
 ```yaml
 apiVersion: batch/v1
@@ -399,7 +393,7 @@ $ cd prod/jobs
 $ kubectl create -f job.yaml
 ```
 
-You are going to observe the race to create hundreds of containers for the job retrying forever:
+你会看到任务无休止的重试，创建了成百上千的容器：
 
 ```bash
 $ kubectl describe jobs 
@@ -430,17 +424,15 @@ Events:
 
 ```
 
-Probably not the result you expected. Over time, the load on the nodes and docker will be quite substantial,
-especially if job is failing very quickly.
+这可不是预期的结果。随着时间的推移，节点和 docker 的负载将相当大，特别是如果作业非常快的失败。
 
-Let's clean up the busy failing job first:
+我们先来清理快速失败的工作：
 
 ```bash
 $ kubectl delete jobs/bad
 ```
 
-Now let's use `activeDeadlineSeconds` to limit amount of retries:
-
+现在让我们使用 `activeDeadlineSeconds` 来限制重试次数：
 
 ```yaml
 apiVersion: batch/v1
@@ -464,31 +456,29 @@ spec:
 $ kubectl create -f bound.yaml
 ```
 
-Now you will see that after 10 seconds, the job has failed:
+现在你会看到，10秒钟后，这个工作失败了：
 
 ```bash
   11s		11s		1	{job-controller }			Normal		DeadlineExceeded	Job was active longer than specified deadline
 ```
 
 
-**NOTE:** Sometimes it makes sense to retry forever. In this case make sure to set a proper pod restart policy to protect from
-accidental DDOS on your cluster.
+**注意：** 有时，永远重试是有道理的。在这种情况下，请确保设置恰当的 pod 重启策略，以防止意外的集群内 DDOS。
 
 
-### Production pattern: Circuit Breaker
+### 生产模式： 断路器
 
-In this example, our web application is an imaginary web server for email. To render the page,
-our frontend has to make two requests to the backend:
+这个例子中，Web 应用是一个虚构的电子邮件服务器。
+要渲染页面，我们的前端必须向后端发起两个请求：
 
-* Talk to the weather service to get current weather
-* Fetch current mail from the database
+* 与天气服务通话以获得当前天气
+* 从数据库获取当前邮件
 
-If the weather service is down, user still would like to review the email, so weather service
-is auxilliary, while current mail service is critical.
+如果天气服务宕机，用户仍然会想查看电子邮件，所以天气服务是边缘服务，而邮件服务是关键服务。
 
-Here is our frontend, weather and mail services written in python:
+这是用python编写的前端、天气和邮件服务：
 
-**Weather**
+**天气**
 
 ```python
 from flask import Flask
@@ -509,7 +499,7 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0')
 ```
 
-**Mail**
+**邮件**
 
 ```python
 from flask import Flask,jsonify
@@ -525,7 +515,7 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0')
 ```
 
-**Frontend**
+**前端**
 
 ```python
 from flask import Flask
@@ -573,8 +563,7 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0')
 ```
 
-Let's create our deployments and services:
-
+我们来创建部署和服务：
 
 ```bash
 $ cd prod/cbreaker
@@ -589,7 +578,7 @@ service "mail" configured
 service "weather" configured
 ```
 
-Check that everyting is running smoothly:
+检查一切运行顺利：
 
 ```bash
 $ kubectl run -i -t --rm cli --image=tutum/curl --restart=Never
@@ -614,7 +603,7 @@ Wind: 14 km/h
 </body>
 ```
 
-Let's introduce weather service that crashes:
+引入会崩溃的气象服务：
 
 ```python
 from flask import Flask
@@ -628,7 +617,7 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0')
 ```
 
-Build and redeploy:
+构建并重新部署：
 
 ```bash
 $ docker build -t $(minikube ip):5000/weather-crash:0.0.1 -f weather-crash.dockerfile .
@@ -637,7 +626,7 @@ $ kubectl apply -f weather-crash.yaml
 deployment "weather" configured
 ```
 
-Let's make sure that it is crashing:
+确保它崩溃：
 
 ```bash
 $ kubectl run -i -t --rm cli --image=tutum/curl --restart=Never
@@ -648,7 +637,7 @@ $ curl http://weather
 <p>The server encountered an internal error and was unable to complete your request.  Either the server is overloaded or there is an error in the application.</p>
 ```
 
-However our frontend should be all good:
+而我们的前端应该是正常的：
 
 ```bash
 $ kubectl run -i -t --rm cli --image=tutum/curl --restart=Never
@@ -678,10 +667,11 @@ root@cli:/# curl http://frontend
 </body>
 ```
 
-Everything is working as expected! There is one problem though, we have just observed the service is crashing quickly, let's see what happens
-if our weather service is slow. This happens way more often in production, e.g. due to network or database overload.
+一切都按预期工作！
+仍有一种问题，我们刚刚观察了服务迅速崩溃的情况，让我们再看看如果天气服务很慢，会发生什么。
+这在生产中更经常地发生，例如，由于网络过载或数据库过载。
 
-To simulate this failure we are going to introduce an artificial delay:
+为了模拟这种失败，我们引入人为的延迟：
 
 ```python
 from flask import Flask
@@ -698,7 +688,7 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0')
 ```
 
-Build and redeploy:
+构建并重新部署：
 
 ```bash
 $ docker build -t $(minikube ip):5000/weather-crash-slow:0.0.1 -f weather-crash-slow.dockerfile .
@@ -707,7 +697,7 @@ $ kubectl apply -f weather-crash-slow.yaml
 deployment "weather" configured
 ```
 
-Just as expected, our weather service is timing out:
+正如预期，天气服务超时了：
 
 ```bash
 curl http://weather 
@@ -717,23 +707,25 @@ curl http://weather
 <p>The server encountered an internal error and was unable to complete your request.  Either the server is overloaded or there is an error in the application.</p>
 ```
 
-The problem though, is that every request to frontend takes 10 seconds as well
+问题在于，每个前端的请求也需要 10 秒钟
 
 ```bash
 curl http://frontend
 ```
 
-This is a much more common outage - users leave in frustration as the service is unavailable.
-To fix this issue we are going to introduce a special proxy with [circuit breaker](http://vulcand.github.io/proxy.html#circuit-breakers).
+这是一种更常见的服务中断：用户沮丧的离开，因为服务不可用。
+为解决这个问题，我们将介绍一种包含[断路器（circuit breaker）](http://vulcand.github.io/proxy.html#circuit-breakers)的特殊代理。
 
 ![standby](http://vulcand.github.io/_images/CircuitStandby.png)
 
-Circuit breaker is a special middleware that is designed to provide a fail-over action in case the service has degraded. It is very helpful to prevent cascading failures - where the failure of the one service leads to failure of another. Circuit breaker observes requests statistics and checks the stats against a special error condition.
+断路器是一种特殊的中间件，旨在在服务降级的情况下提供故障转移操作。
+有助于防止级联故障：一个服务的故障导致另一个服务的故障。
+断路器监控请求统计信息，并检查特定错误的统计信息。
 
 
 ![tripped](http://vulcand.github.io/_images/CircuitTripped.png)
 
-Here is our simple circuit breaker written in python:
+这是用 python 写的简单断路器：
 
 ```python
 from flask import Flask
@@ -793,7 +785,7 @@ if __name__ == "__main__":
     app.run(host='0.0.0.0', port=6000)
 ```
 
-Let's build and redeploy circuit breaker:
+我们来构建和重新部署断路器：
 
 ```bash
 $ docker build -t $(minikube ip):5000/cbreaker:0.0.1 -f cbreaker.dockerfile .
@@ -805,7 +797,7 @@ service "weather" configured
 ```
 
 
-Circuit breaker will detect service outage and auxilliary weather service will not bring our mail service down any more:
+断路器将检测到服务中断，边缘的天气服务不会使邮件服务失效：
 
 ```bash
 curl http://frontend
@@ -822,15 +814,14 @@ curl http://frontend
 </body>
 ```
 
-**NOTE:** There are some production level proxies that natively support circuit breaker pattern - [Vulcand](http://vulcand.github.io/) or [Nginx plus](https://www.nginx.com/products/)
+**注意：** 有一些生产级别的代理器，原生支持断路器模式：[Vulcand](http://vulcand.github.io/) 和 [Nginx plus](https://www.nginx.com/products/)
 
 
-### Production Pattern: Sidecar For Rate and Connection Limiting
+### 生产模式： 用于速率和连接控制的跨斗（Sidecar）
 
-In the previous example we have used a sidecar pattern - a special proxy local to the Pod, that adds additional logic to the service, such as error detection, TLS termination
-and other features.
+上一个例子中，我们使用了一种跨斗模式：代理请求到本地的特殊 Pod，为服务添加了额外的逻辑，如错误检测，TLS 终止等功能。
 
-Here is an example of sidecar nginx proxy that adds rate and connection limits:
+下面是一个为 Nginx 代理添加速率和连接限制的跨斗的例子：
 
 ```bash
 $ cd prod/sidecar
@@ -842,11 +833,9 @@ $ kubectl apply -f sidecar.yaml
 deployment "sidecar" configured
 ```
 
-Try to hit the service faster than one request per second and you will see the rate limiting in action
+尝试更快地访问服务（每秒多于一个请求），您将看到速率限制起作用
 
 ```bash
 $ kubectl run -i -t --rm cli --image=tutum/curl --restart=Never
 curl http://sidecar
 ```
-
-
