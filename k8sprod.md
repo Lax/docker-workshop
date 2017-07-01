@@ -814,7 +814,7 @@ curl http://frontend
 </body>
 ```
 
-**注意：** 有一些生产级别的代理器，原生支持断路器模式：[Vulcand](http://vulcand.github.io/) 和 [Nginx plus](https://www.nginx.com/products/)
+**注意：** 有一些生产级别的代理器，原生支持断路器模式——如 [Vulcand](http://vulcand.github.io/)、[Nginx plus](https://www.nginx.com/products/) 或 [Envoy](https://lyft.github.io/envoy/)。
 
 
 ### 生产模式： 用于速率和连接控制的跨斗（Sidecar）
@@ -839,3 +839,6 @@ deployment "sidecar" configured
 $ kubectl run -i -t --rm cli --image=tutum/curl --restart=Never
 curl http://sidecar
 ```
+
+
+[Istio](https://istio.io/docs/concepts/what-is-istio/overview.html#architecture) 是体现这种设计的平台的例子。
